@@ -1,0 +1,349 @@
+2. Install Nginx on Ubuntu
+Update System Packages
+
+sudo apt update && sudo apt upgrade -y
+
+Install Nginx
+
+sudo apt install -y nginx
+
+Start and Enable Nginx
+
+sudo systemctl start nginx
+sudo systemctl enable nginx
+
+Adjust Firewall (if UFW is enabled)
+
+sudo ufw allow 'Nginx Full'
+
+Verify Nginx Installation
+
+Open a browser and navigate to http://your_server_ip/. You should see the Nginx welcome page.
+3. Install PostgreSQL on Ubuntu
+Install PostgreSQL
+
+sudo apt install -y postgresql postgresql-contrib
+
+Start and Enable PostgreSQL
+
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+
+Secure PostgreSQL
+Switch to the postgres User
+
+sudo -i -u postgres
+
+Create a Database and User
+
+createuser --interactive
+createdb mydatabase
+psql
+
+In the psql prompt, set a password for your new user:
+
+ALTER USER myuser WITH ENCRYPTED PASSWORD 'mypassword';
+GRANT ALL PRIVILEGES ON DATABASE mydatabase TO myuser;
+\q
+
+Replace myuser, mypassword, and mydatabase with your preferred credentials.
+Exit postgres User
+
+exit
+
+4. Install Docker and Docker Compose
+Uninstall Old Versions (If Any)
+
+sudo apt remove docker docker-engine docker.io containerd runc
+
+Install Dependencies
+
+sudo apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
+Add Docker’s GPG Key and Repository
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+Install Docker Engine
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io
+
+Verify Docker Installation
+
+sudo docker run hello-world
+
+Manage Docker as a Non-Root User
+
+sudo usermod -aG docker $USER
+
+Log out and log back in to apply the changes.
+Install Docker Compose
+
+sudo curl -L "https://github.com/docker/compose/releases/download/2.23.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+docker-compose --version
+
+5. Set Up Docker Networks
+
+Create a dedicated Docker network for monitoring tools:
+
+docker network create monitoring
+
+6. Run Prometheus with Docker
+Create Prometheus Configuration
+
+mkdir -p ~/docker/prometheus
+cd ~/docker/prometheus
+
+Create prometheus.yml:
+
+nano prometheus.yml
+
+Add the following:
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['prometheus:9090']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['node_exporter:9100']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+Create Docker Compose File
+
+nano docker-compose.yml
+
+Add:
+
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: node_exporter
+    networks:
+      - monitoring
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    external: true
+
+Start Prometheus and Related Services
+
+docker-compose up -d
+
+7. Run Grafana with Docker
+Set Up Grafana
+
+mkdir -p ~/docker/grafana
+cd ~/docker/grafana
+
+Create docker-compose.yml:
+
+version: '3.8'
+
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - monitoring
+
+volumes:
+  grafana-data:
+
+networks:
+  monitoring:
+    external: true
+
+Start Grafana
+
+docker-compose up -d
+
+Access Grafana
+
+Navigate to http://your_server_ip:3000. Default credentials are admin / admin.
+8. Run Jenkins with Docker
+Set Up Jenkins
+
+mkdir -p ~/docker/jenkins
+cd ~/docker/jenkins
+
+Create docker-compose.yml:
+
+version: '3.8'
+
+services:
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: jenkins
+    user: root
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins-data:/var/jenkins_home
+    networks:
+      - jenkins
+
+volumes:
+  jenkins-data:
+
+networks:
+  jenkins:
+
+Start Jenkins
+
+docker-compose up -d
+
+Access Jenkins
+
+Navigate to http://your_server_ip:8080 and follow the initial setup instructions.
+9. Configure Nginx as a Reverse Proxy
+Set Up Server Blocks for Each Service
+Create Nginx Configurations
+
+sudo nano /etc/nginx/sites-available/grafana
+
+Add:
+
+server {
+    listen 80;
+    server_name grafana.your_domain_or_ip;
+
+    location / {
+        proxy_pass http://localhost:3000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+sudo nano /etc/nginx/sites-available/jenkins
+
+Add:
+
+server {
+    listen 80;
+    server_name jenkins.your_domain_or_ip;
+
+    location / {
+        proxy_pass http://localhost:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+Enable the Sites
+
+sudo ln -s /etc/nginx/sites-available/grafana /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/jenkins /etc/nginx/sites-enabled/
+
+Test and Reload Nginx
+
+sudo nginx -t
+sudo systemctl reload nginx
+
+Optional: Set Up SSL with Let's Encrypt
+
+Install Certbot:
+
+sudo apt install -y certbot python3-certbot-nginx
+
+Obtain SSL Certificates:
+
+sudo certbot --nginx -d grafana.your_domain_or_ip -d jenkins.your_domain_or_ip
+
+10. Optimize Nginx and PostgreSQL
+Optimize Nginx
+
+Edit /etc/nginx/nginx.conf and adjust worker processes:
+
+worker_processes auto;
+events {
+    worker_connections 1024;
+}
+
+Enable Gzip compression by adding to http block:
+
+gzip on;
+gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+Optimize PostgreSQL
+
+Edit /etc/postgresql/12/main/postgresql.conf (replace 12 with your PostgreSQL version).
+
+Adjust settings like:
+
+shared_buffers = 1GB
+work_mem = 50MB
+maintenance_work_mem = 256MB
+
+Restart PostgreSQL:
+
+sudo systemctl restart postgresql
+
+11. Set Up Monitoring and Alerting
+Configure Grafana Dashboards
+
+    Add Prometheus as Data Source:
+        In Grafana, navigate to Configuration > Data Sources > Add data source.
+        Select Prometheus and set http://prometheus:9090 as the URL.
+    Import Dashboards:
+        Use pre-built dashboards by importing them via Dashboards > Import.
+
+Set Up Alerting in Grafana
+
+    Create Notification Channels:
+        Configure email, Slack, or other channels.
+    Set Up Alerts:
+        Create alerts on key metrics (e.g., high CPU usage).
+
+12. Best Practices and Security Considerations
+General Security
+
+    Keep Software Updated: Regularly update all installed packages.
+    Use Strong Passwords: Ensure all services have secure passwords.
+    Firewall Configuration: Use UFW to allow only necessary ports.
+
